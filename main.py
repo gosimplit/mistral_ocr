@@ -27,6 +27,12 @@ TABLE_ROW_RE    = re.compile(r'^\s*\|(.+)\|\s*$')
 IMG_LINE_RE     = re.compile(r'^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$')
 IMG_INLINE_RE   = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 
+# Estilos inline
+BOLD_ITALIC_RE  = re.compile(r'(\*\*\*|___)(.+?)\1')
+BOLD_RE         = re.compile(r'(\*\*|__)(.+?)\1')
+ITALIC_RE       = re.compile(r'(\*|_)(.+?)\1')
+STRIKE_RE       = re.compile(r'(~~)(.+?)\1')
+
 def force_styles_black(doc: Document):
     target_styles = ["Normal", "List Paragraph", "List Bullet", "List Number"]
     target_styles += [f"Heading {i}" for i in range(1, 10)]
@@ -41,19 +47,50 @@ def force_styles_black(doc: Document):
 def add_paragraph(doc, text):
     if not text.strip():
         doc.add_paragraph("")
-    else:
-        doc.add_paragraph(text)
+        return
+
+    p = doc.add_paragraph()
+    pos = 0
+
+    patterns = [
+        (BOLD_ITALIC_RE, {"bold": True, "italic": True}),
+        (BOLD_RE, {"bold": True}),
+        (ITALIC_RE, {"italic": True}),
+        (STRIKE_RE, {"strike": True}),
+    ]
+
+    while pos < len(text):
+        match = None
+        style = {}
+        for pat, fmt in patterns:
+            m = pat.search(text, pos)
+            if m and (not match or m.start() < match.start()):
+                match, style = m, fmt
+
+        if not match:
+            p.add_run(text[pos:])
+            break
+
+        if match.start() > pos:
+            p.add_run(text[pos:match.start()])
+
+        run = p.add_run(match.group(2))
+        for k, v in style.items():
+            setattr(run.font, k, v)
+
+        pos = match.end()
 
 def flush_list(doc, buf, ordered):
     if not buf:
         return
     style = "List Number" if ordered else "List Bullet"
     for item in buf:
-        doc.add_paragraph(item, style=style)
+        add_paragraph(doc, item)
+        last_p = doc.paragraphs[-1]
+        last_p.style = style
     buf.clear()
 
 def is_align_row(row: str) -> bool:
-    """Devuelve True si la fila es solo alineación tipo --- o :---:."""
     row = row.strip().strip("|").strip()
     cells = [c.strip() for c in row.split("|")]
     return all(re.fullmatch(r':?-{3,}:?', c) for c in cells)
@@ -61,7 +98,6 @@ def is_align_row(row: str) -> bool:
 def flush_table(doc, rows):
     if not rows:
         return
-    # Filtra filas de alineación (| --- | --- | ... |)
     filtered = [r for r in rows if not is_align_row(r)]
     if not filtered:
         return
@@ -160,7 +196,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
     for raw in lines:
         line = raw.rstrip("\n")
 
-        # Tablas
         if TABLE_ROW_RE.match(line):
             in_table = True
             tbl_buf.append(line)
@@ -174,7 +209,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
                 tbl_buf = []
                 in_table = False
 
-        # Encabezados
         m = HEADING_RE.match(line)
         if m:
             flush_para()
@@ -186,7 +220,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             doc.add_heading(text, level=level)
             continue
 
-        # Listas
         m_ul = UL_RE.match(line)
         m_ol = OL_RE.match(line)
         if m_ul:
@@ -200,7 +233,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             ol_buf.append(m_ol.group(1).strip())
             continue
 
-        # Imagen en línea (bloque)
         m_img = IMG_LINE_RE.match(line)
         if m_img:
             flush_para()
@@ -212,14 +244,12 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
                 add_image_paragraph(doc, blob)
             continue
 
-        # Separador de párrafos
         if not line.strip():
             flush_para()
             flush_list(doc, ul_buf, ordered=False)
             flush_list(doc, ol_buf, ordered=True)
             continue
 
-        # Texto normal
         para_buf.append(line.strip())
 
     flush_para()
