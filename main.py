@@ -44,14 +44,22 @@ def force_styles_black(doc: Document):
         except KeyError:
             pass
 
-def add_paragraph(doc, text):
+def add_paragraph(container, text, heading=False):
+    """
+    Si heading=True, 'container' es un Paragraph ya creado por doc.add_heading().
+    Si no, 'container' es el Document.
+    """
     if not text.strip():
-        doc.add_paragraph("")
+        if not heading:
+            container.add_paragraph("")
         return
 
-    p = doc.add_paragraph()
-    pos = 0
+    if heading:
+        p = container
+    else:
+        p = container.add_paragraph()
 
+    pos = 0
     patterns = [
         (BOLD_ITALIC_RE, {"bold": True, "italic": True}),
         (BOLD_RE, {"bold": True}),
@@ -217,7 +225,12 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             level = len(m.group(1))
             text = m.group(2).strip()
             level = min(max(level, 1), 9)
-            doc.add_heading(text, level=level)
+
+            # Crear título vacío
+            p = doc.add_heading(level=level)
+
+            # Aplicar estilos inline dentro del título
+            add_paragraph(p, text, heading=True)
             continue
 
         m_ul = UL_RE.match(line)
