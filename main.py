@@ -27,12 +27,6 @@ TABLE_ROW_RE    = re.compile(r'^\s*\|(.+)\|\s*$')
 IMG_LINE_RE     = re.compile(r'^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$')
 IMG_INLINE_RE   = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 
-# Estilos inline
-BOLD_ITALIC_RE  = re.compile(r'(\*\*\*|___)(.+?)\1')
-BOLD_RE         = re.compile(r'(\*\*|__)(.+?)\1')
-ITALIC_RE       = re.compile(r'(\*|_)(.+?)\1')
-STRIKE_RE       = re.compile(r'(~~)(.+?)\1')
-
 def force_styles_black(doc: Document):
     target_styles = ["Normal", "List Paragraph", "List Bullet", "List Number"]
     target_styles += [f"Heading {i}" for i in range(1, 10)]
@@ -44,61 +38,22 @@ def force_styles_black(doc: Document):
         except KeyError:
             pass
 
-def add_paragraph(container, text, heading=False):
-    """
-    Si heading=True, 'container' es un Paragraph ya creado por doc.add_heading().
-    Si no, 'container' es el Document.
-    """
+def add_paragraph(doc, text):
     if not text.strip():
-        if not heading:
-            container.add_paragraph("")
-        return
-
-    if heading:
-        p = container
+        doc.add_paragraph("")
     else:
-        p = container.add_paragraph()
-
-    pos = 0
-    patterns = [
-        (BOLD_ITALIC_RE, {"bold": True, "italic": True}),
-        (BOLD_RE, {"bold": True}),
-        (ITALIC_RE, {"italic": True}),
-        (STRIKE_RE, {"strike": True}),
-    ]
-
-    while pos < len(text):
-        match = None
-        style = {}
-        for pat, fmt in patterns:
-            m = pat.search(text, pos)
-            if m and (not match or m.start() < match.start()):
-                match, style = m, fmt
-
-        if not match:
-            p.add_run(text[pos:])
-            break
-
-        if match.start() > pos:
-            p.add_run(text[pos:match.start()])
-
-        run = p.add_run(match.group(2))
-        for k, v in style.items():
-            setattr(run.font, k, v)
-
-        pos = match.end()
+        doc.add_paragraph(text)
 
 def flush_list(doc, buf, ordered):
     if not buf:
         return
     style = "List Number" if ordered else "List Bullet"
     for item in buf:
-        add_paragraph(doc, item)
-        last_p = doc.paragraphs[-1]
-        last_p.style = style
+        doc.add_paragraph(item, style=style)
     buf.clear()
 
 def is_align_row(row: str) -> bool:
+    """Devuelve True si la fila es solo alineación tipo --- o :---:."""
     row = row.strip().strip("|").strip()
     cells = [c.strip() for c in row.split("|")]
     return all(re.fullmatch(r':?-{3,}:?', c) for c in cells)
@@ -106,6 +61,7 @@ def is_align_row(row: str) -> bool:
 def flush_table(doc, rows):
     if not rows:
         return
+    # Filtra filas de alineación (| --- | --- | ... |)
     filtered = [r for r in rows if not is_align_row(r)]
     if not filtered:
         return
@@ -204,6 +160,7 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
     for raw in lines:
         line = raw.rstrip("\n")
 
+        # Tablas
         if TABLE_ROW_RE.match(line):
             in_table = True
             tbl_buf.append(line)
@@ -217,6 +174,7 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
                 tbl_buf = []
                 in_table = False
 
+        # Encabezados
         m = HEADING_RE.match(line)
         if m:
             flush_para()
@@ -225,14 +183,10 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             level = len(m.group(1))
             text = m.group(2).strip()
             level = min(max(level, 1), 9)
-
-            # Crear título vacío
-            p = doc.add_heading(level=level)
-
-            # Aplicar estilos inline dentro del título
-            add_paragraph(p, text, heading=True)
+            doc.add_heading(text, level=level)
             continue
 
+        # Listas
         m_ul = UL_RE.match(line)
         m_ol = OL_RE.match(line)
         if m_ul:
@@ -246,6 +200,7 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             ol_buf.append(m_ol.group(1).strip())
             continue
 
+        # Imagen en línea (bloque)
         m_img = IMG_LINE_RE.match(line)
         if m_img:
             flush_para()
@@ -257,12 +212,14 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
                 add_image_paragraph(doc, blob)
             continue
 
+        # Separador de párrafos
         if not line.strip():
             flush_para()
             flush_list(doc, ul_buf, ordered=False)
             flush_list(doc, ol_buf, ordered=True)
             continue
 
+        # Texto normal
         para_buf.append(line.strip())
 
     flush_para()
@@ -284,9 +241,12 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
 def make_docx():
     data = request.get_json(silent=True)
     if data and isinstance(data, dict) and ("markdown" in data or "text" in data):
-        filename = data.get("filename", "output.docx")
+        # Usar output_name si existe, sino filename, sino 'output'
+        base_name = data.get("output_name") or data.get("filename") or "output"
+        if not base_name.lower().endswith(".docx"):
+            base_name += ".docx"
         if data.get("markdown"):
-            buf, fname = markdown_to_doc(data["markdown"], images={}, filename=filename)
+            buf, fname = markdown_to_doc(data["markdown"], images={}, filename=base_name)
         else:
             doc = Document()
             force_styles_black(doc)
@@ -294,20 +254,23 @@ def make_docx():
             buf = io.BytesIO()
             doc.save(buf)
             buf.seek(0)
-            fname = filename
+            fname = base_name
         return send_file(buf, as_attachment=True, download_name=fname,
                          mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
     if request.form and ("markdown" in request.form or "text" in request.form):
         md_text = request.form.get("markdown", None)
         plain_text = request.form.get("text", None)
-        filename = request.form.get("filename", "output.docx")
+        # Usar output_name si existe, sino filename, sino 'output'
+        base_name = request.form.get("output_name") or request.form.get("filename") or "output"
+        if not base_name.lower().endswith(".docx"):
+            base_name += ".docx"
         images_map = {}
         for f in request.files.getlist("file"):
             if isinstance(f, FileStorage) and f.filename:
                 images_map[f.filename] = f.read()
         if md_text:
-            buf, fname = markdown_to_doc(md_text, images_map, filename=filename)
+            buf, fname = markdown_to_doc(md_text, images_map, filename=base_name)
         else:
             doc = Document()
             force_styles_black(doc)
@@ -315,7 +278,7 @@ def make_docx():
             buf = io.BytesIO()
             doc.save(buf)
             buf.seek(0)
-            fname = filename
+            fname = base_name
         return send_file(buf, as_attachment=True, download_name=fname,
                          mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
