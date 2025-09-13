@@ -1,6 +1,7 @@
 import os
 import io
 import re
+import base64
 from flask import Flask, request, send_file, jsonify
 from docx import Document
 from docx.shared import RGBColor, Inches
@@ -53,7 +54,6 @@ def flush_list(doc, buf, ordered):
     buf.clear()
 
 def is_align_row(row: str) -> bool:
-    """Devuelve True si la fila es solo alineación tipo --- o :---:."""
     row = row.strip().strip("|").strip()
     cells = [c.strip() for c in row.split("|")]
     return all(re.fullmatch(r':?-{3,}:?', c) for c in cells)
@@ -61,7 +61,6 @@ def is_align_row(row: str) -> bool:
 def flush_table(doc, rows):
     if not rows:
         return
-    # Filtra filas de alineación (| --- | --- | ... |)
     filtered = [r for r in rows if not is_align_row(r)]
     if not filtered:
         return
@@ -160,7 +159,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
     for raw in lines:
         line = raw.rstrip("\n")
 
-        # Tablas
         if TABLE_ROW_RE.match(line):
             in_table = True
             tbl_buf.append(line)
@@ -174,7 +172,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
                 tbl_buf = []
                 in_table = False
 
-        # Encabezados
         m = HEADING_RE.match(line)
         if m:
             flush_para()
@@ -186,7 +183,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             doc.add_heading(text, level=level)
             continue
 
-        # Listas
         m_ul = UL_RE.match(line)
         m_ol = OL_RE.match(line)
         if m_ul:
@@ -200,7 +196,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             ol_buf.append(m_ol.group(1).strip())
             continue
 
-        # Imagen en línea (bloque)
         m_img = IMG_LINE_RE.match(line)
         if m_img:
             flush_para()
@@ -212,14 +207,12 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
                 add_image_paragraph(doc, blob)
             continue
 
-        # Separador de párrafos
         if not line.strip():
             flush_para()
             flush_list(doc, ul_buf, ordered=False)
             flush_list(doc, ol_buf, ordered=True)
             continue
 
-        # Texto normal
         para_buf.append(line.strip())
 
     flush_para()
@@ -239,14 +232,26 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
 
 @app.post("/docx")
 def make_docx():
+    # --------- Caso JSON con imágenes en base64 ---------
     data = request.get_json(silent=True)
     if data and isinstance(data, dict) and ("markdown" in data or "text" in data):
-        # Usar output_name si existe, sino filename, sino 'output'
         base_name = data.get("output_name") or data.get("filename") or "output"
         if not base_name.lower().endswith(".docx"):
             base_name += ".docx"
+
+        images_map = {}
+        if "images" in data and isinstance(data["images"], list):
+            for img_obj in data["images"]:
+                img_id = img_obj.get("id")
+                img_b64 = img_obj.get("image_base64")
+                if img_id and img_b64:
+                    try:
+                        images_map[img_id] = base64.b64decode(img_b64)
+                    except Exception:
+                        pass
+
         if data.get("markdown"):
-            buf, fname = markdown_to_doc(data["markdown"], images={}, filename=base_name)
+            buf, fname = markdown_to_doc(data["markdown"], images=images_map, filename=base_name)
         else:
             doc = Document()
             force_styles_black(doc)
@@ -255,20 +260,27 @@ def make_docx():
             doc.save(buf)
             buf.seek(0)
             fname = base_name
-        return send_file(buf, as_attachment=True, download_name=fname,
-                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=fname,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    # --------- Caso multipart con imágenes binarias ---------
     if request.form and ("markdown" in request.form or "text" in request.form):
         md_text = request.form.get("markdown", None)
         plain_text = request.form.get("text", None)
-        # Usar output_name si existe, sino filename, sino 'output'
         base_name = request.form.get("output_name") or request.form.get("filename") or "output"
         if not base_name.lower().endswith(".docx"):
             base_name += ".docx"
+
         images_map = {}
         for f in request.files.getlist("file"):
             if isinstance(f, FileStorage) and f.filename:
                 images_map[f.filename] = f.read()
+
         if md_text:
             buf, fname = markdown_to_doc(md_text, images_map, filename=base_name)
         else:
@@ -279,10 +291,18 @@ def make_docx():
             doc.save(buf)
             buf.seek(0)
             fname = base_name
-        return send_file(buf, as_attachment=True, download_name=fname,
-                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-    return jsonify({"error": "Bad request: envía JSON con 'markdown' o multipart/form-data con 'markdown' y archivos 'file'."}), 400
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=fname,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    # --------- Si no es ni JSON ni multipart ---------
+    return jsonify({
+        "error": "Bad request: envía JSON (markdown + images base64) o multipart/form-data (markdown + archivos file)."
+    }), 400
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
