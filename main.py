@@ -309,16 +309,20 @@ def make_docx():
 @app.post("/merge")
 def merge_docx():
     """
-    Espera JSON con {"docs": "<string JSON con los docs>"} o {"docs": { ... }}
-    Devuelve un único DOCX concatenado
+    Soporta JSON o form-data.
+    - En JSON: {"docs": {..}} o {"docs": "<string JSON>"}
+    - En form-data: campo "docs" (string JSON), campo "output_name"
     """
     data = request.get_json(silent=True)
+    if not data:
+        data = request.form.to_dict()
+
     if not data or "docs" not in data:
         return jsonify({"error": "Bad request: falta 'docs'"}), 400
 
     docs_field = data["docs"]
 
-    # Si llega como string JSON -> parsearlo
+    # Parsear docs
     if isinstance(docs_field, str):
         try:
             docs_dict = json.loads(docs_field)
@@ -360,14 +364,13 @@ def merge_docx():
 @app.post("/debug")
 def debug():
     """
-    Devuelve exactamente lo que Flask recibe como JSON en el body.
-    Útil para depurar lo que está enviando n8n.
+    Devuelve exactamente lo que Flask recibe.
+    Soporta JSON y form-data.
     """
-    try:
-        body = request.get_json(force=True)
-    except Exception:
-        return jsonify({"error": "No se pudo parsear el JSON"}), 400
-    return jsonify(body)
+    data = request.get_json(silent=True)
+    if not data:
+        data = request.form.to_dict()
+    return jsonify({"received": data})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
