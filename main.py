@@ -233,7 +233,6 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
 
 @app.post("/docx")
 def make_docx():
-    # ... (igual que antes, no modificado)
     data = request.get_json(silent=True)
     if data and isinstance(data, dict) and ("markdown" in data or "text" in data):
         base_name = data.get("output_name") or data.get("filename") or "output"
@@ -310,14 +309,25 @@ def make_docx():
 @app.post("/merge")
 def merge_docx():
     """
-    Espera JSON con {"docs": {"1": base64docx1, "2": base64docx2, ...}}
+    Espera JSON con {"docs": "<string JSON con los docs>"} o {"docs": { ... }}
     Devuelve un único DOCX concatenado
     """
     data = request.get_json(silent=True)
-    if not data or "docs" not in data or not isinstance(data["docs"], dict):
-        return jsonify({"error": "Bad request: envía JSON con campo 'docs'"}), 400
+    if not data or "docs" not in data:
+        return jsonify({"error": "Bad request: falta 'docs'"}), 400
 
-    docs_dict = data["docs"]
+    docs_field = data["docs"]
+
+    # Si llega como string JSON -> parsearlo
+    if isinstance(docs_field, str):
+        try:
+            docs_dict = json.loads(docs_field)
+        except Exception:
+            return jsonify({"error": "El campo 'docs' no es un JSON válido"}), 400
+    elif isinstance(docs_field, dict):
+        docs_dict = docs_field
+    else:
+        return jsonify({"error": "Formato de 'docs' no válido"}), 400
 
     merged = None
     for key in sorted(docs_dict.keys(), key=lambda x: int(x)):
