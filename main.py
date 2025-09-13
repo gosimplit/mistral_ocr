@@ -2,6 +2,7 @@ import os
 import io
 import re
 import base64
+import json
 from flask import Flask, request, send_file, jsonify
 from docx import Document
 from docx.shared import RGBColor, Inches
@@ -268,7 +269,7 @@ def make_docx():
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
-    # --------- Caso multipart con imágenes binarias ---------
+    # --------- Caso multipart con imágenes en string JSON ---------
     if request.form and ("markdown" in request.form or "text" in request.form):
         md_text = request.form.get("markdown", None)
         plain_text = request.form.get("text", None)
@@ -277,6 +278,21 @@ def make_docx():
             base_name += ".docx"
 
         images_map = {}
+
+        # Procesar campo "images" como string JSON
+        if "images" in request.form:
+            try:
+                images_json = json.loads(request.form["images"])
+                if isinstance(images_json, list):
+                    for img_obj in images_json:
+                        img_id = img_obj.get("id")
+                        img_b64 = img_obj.get("image_base64")
+                        if img_id and img_b64:
+                            images_map[img_id] = base64.b64decode(img_b64)
+            except Exception:
+                pass
+
+        # También permitir ficheros binarios (opcional)
         for f in request.files.getlist("file"):
             if isinstance(f, FileStorage) and f.filename:
                 images_map[f.filename] = f.read()
@@ -301,7 +317,7 @@ def make_docx():
 
     # --------- Si no es ni JSON ni multipart ---------
     return jsonify({
-        "error": "Bad request: envía JSON (markdown + images base64) o multipart/form-data (markdown + archivos file)."
+        "error": "Bad request: envía JSON (markdown + images base64) o multipart/form-data (markdown + campo images como string JSON)."
     }), 400
 
 if __name__ == "__main__":
