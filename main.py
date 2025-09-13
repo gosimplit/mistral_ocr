@@ -53,7 +53,8 @@ def is_align_row(row: str) -> bool:
     """Detecta filas de alineación en tablas Markdown como | :-- | :--: | --- |"""
     row = row.strip().strip("|").strip()
     cells = [c.strip() for c in row.split("|")]
-    return all(re.fullmatch(r':?-{3,}:?', c) for c in cells)
+    # aceptar 2 o más guiones con opcionales dos puntos a izquierda/derecha
+    return all(re.fullmatch(r':?-{2,}:?', c) for c in cells)
 
 def flush_table(doc, rows):
     if not rows:
