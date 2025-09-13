@@ -7,12 +7,7 @@ from flask import Flask, request, send_file, jsonify
 from docx import Document
 from docx.shared import RGBColor, Inches
 from werkzeug.datastructures import FileStorage
-
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except Exception:
-    PIL_AVAILABLE = False
+from PIL import Image, UnidentifiedImageError
 
 app = Flask(__name__)
 
@@ -89,22 +84,21 @@ def add_image_paragraph(doc: Document, img_bytes: bytes):
 
     stream = io.BytesIO(img_bytes)
 
-    if PIL_AVAILABLE:
-        try:
-            with Image.open(io.BytesIO(img_bytes)) as im:
-                width_px, height_px = im.size
-                dpi_x = im.info.get("dpi", (96, 96))[0] or 96
-                width_in = width_px / float(dpi_x)
-                scale = 1.0
-                if width_in > usable_width_in:
-                    scale = usable_width_in / width_in
-                new_width_in = width_in * scale
-                p = doc.add_paragraph()
-                run = p.add_run()
-                run.add_picture(stream, width=Inches(new_width_in))
-                return
-        except Exception:
-            pass
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as im:
+            width_px, height_px = im.size
+            dpi_x = im.info.get("dpi", (96, 96))[0] or 96
+            width_in = width_px / float(dpi_x)
+            scale = 1.0
+            if width_in > usable_width_in:
+                scale = usable_width_in / width_in
+            new_width_in = width_in * scale
+            p = doc.add_paragraph()
+            run = p.add_run()
+            run.add_picture(stream, width=Inches(new_width_in))
+            return
+    except Exception:
+        pass
 
     p = doc.add_paragraph()
     run = p.add_run()
@@ -304,7 +298,7 @@ def make_docx():
 
     return jsonify({"error": "Bad request"}), 400
 
-# -------------------- Nuevo endpoint /merge --------------------
+# -------------------- Endpoint /merge --------------------
 
 @app.post("/merge")
 def merge_docx():
@@ -343,7 +337,6 @@ def merge_docx():
         if merged is None:
             merged = Document(io.BytesIO(content))
         else:
-            # salto de página antes de añadir nuevo documento
             merged.add_page_break()
             for element in subdoc.element.body:
                 merged.element.body.append(element)
@@ -359,18 +352,61 @@ def merge_docx():
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-# -------------------- Nuevo endpoint /debug --------------------
+# -------------------- Nuevo endpoint /crop --------------------
 
-@app.post("/debug")
-def debug():
+@app.post("/crop")
+def crop_image():
     """
-    Devuelve exactamente lo que Flask recibe.
-    Soporta JSON y form-data.
+    Espera:
+      - file: imagen original (binario, multipart/form-data)
+      - coords: JSON como string, por ejemplo:
+        {
+          "id":"img-0.jpeg",
+          "top_left_x":289,
+          "top_left_y":667,
+          "bottom_right_x":1132,
+          "bottom_right_y":891
+        }
+    Devuelve:
+      - La imagen recortada en binario (JPEG).
     """
-    data = request.get_json(silent=True)
-    if not data:
-        data = request.form.to_dict()
-    return jsonify({"received": data})
+    if "file" not in request.files:
+        return jsonify({"error": "Falta la imagen en 'file'"}), 400
+    coords_raw = request.form.get("coords")
+    if not coords_raw:
+        return jsonify({"error": "Faltan las coordenadas en 'coords'"}), 400
+
+    try:
+        coords = json.loads(coords_raw)
+    except Exception as e:
+        return jsonify({"error": f"coords inválido: {e}"}), 400
+
+    try:
+        img_file = request.files["file"]
+        img = Image.open(img_file.stream).convert("RGB")
+    except UnidentifiedImageError:
+        return jsonify({"error": "Formato de imagen no reconocido"}), 400
+
+    try:
+        x1 = int(coords["top_left_x"])
+        y1 = int(coords["top_left_y"])
+        x2 = int(coords["bottom_right_x"])
+        y2 = int(coords["bottom_right_y"])
+    except Exception:
+        return jsonify({"error": "Coordenadas incompletas o no numéricas"}), 400
+
+    crop = img.crop((x1, y1, x2, y2))
+
+    buf = io.BytesIO()
+    crop.save(buf, format="JPEG", quality=92)
+    buf.seek(0)
+
+    return send_file(
+        buf,
+        mimetype="image/jpeg",
+        as_attachment=True,
+        download_name=coords.get("id", "crop.jpeg")
+    )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
