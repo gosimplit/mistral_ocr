@@ -50,6 +50,7 @@ def flush_list(doc, buf, ordered):
     buf.clear()
 
 def is_align_row(row: str) -> bool:
+    """Detecta filas de alineación en tablas Markdown como | :-- | :--: | --- |"""
     row = row.strip().strip("|").strip()
     cells = [c.strip() for c in row.split("|")]
     return all(re.fullmatch(r':?-{3,}:?', c) for c in cells)
@@ -57,6 +58,7 @@ def is_align_row(row: str) -> bool:
 def flush_table(doc, rows):
     if not rows:
         return
+    # Filtra filas de alineación
     filtered = [r for r in rows if not is_align_row(r)]
     if not filtered:
         return
@@ -352,7 +354,7 @@ def merge_docx():
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-# -------------------- Nuevo endpoint /crop --------------------
+# -------------------- Endpoint /crop --------------------
 
 @app.post("/crop")
 def crop_image():
