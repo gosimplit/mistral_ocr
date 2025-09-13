@@ -355,6 +355,20 @@ def merge_docx():
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+# -------------------- Nuevo endpoint /debug --------------------
+
+@app.post("/debug")
+def debug():
+    """
+    Devuelve exactamente lo que Flask recibe como JSON en el body.
+    Útil para depurar lo que está enviando n8n.
+    """
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "No se pudo parsear el JSON"}), 400
+    return jsonify(body)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
