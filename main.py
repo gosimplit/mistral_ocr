@@ -233,7 +233,7 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
 
 @app.post("/docx")
 def make_docx():
-    # --------- Caso JSON con imágenes en base64 ---------
+    # ... (igual que antes, no modificado)
     data = request.get_json(silent=True)
     if data and isinstance(data, dict) and ("markdown" in data or "text" in data):
         base_name = data.get("output_name") or data.get("filename") or "output"
@@ -262,14 +262,9 @@ def make_docx():
             buf.seek(0)
             fname = base_name
 
-        return send_file(
-            buf,
-            as_attachment=True,
-            download_name=fname,
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        return send_file(buf, as_attachment=True, download_name=fname,
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-    # --------- Caso multipart con imágenes en string JSON ---------
     if request.form and ("markdown" in request.form or "text" in request.form):
         md_text = request.form.get("markdown", None)
         plain_text = request.form.get("text", None)
@@ -278,8 +273,6 @@ def make_docx():
             base_name += ".docx"
 
         images_map = {}
-
-        # Procesar campo "images" como string JSON
         if "images" in request.form:
             try:
                 images_json = json.loads(request.form["images"])
@@ -292,7 +285,6 @@ def make_docx():
             except Exception:
                 pass
 
-        # También permitir ficheros binarios (opcional)
         for f in request.files.getlist("file"):
             if isinstance(f, FileStorage) and f.filename:
                 images_map[f.filename] = f.read()
@@ -308,17 +300,50 @@ def make_docx():
             buf.seek(0)
             fname = base_name
 
-        return send_file(
-            buf,
-            as_attachment=True,
-            download_name=fname,
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        return send_file(buf, as_attachment=True, download_name=fname,
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-    # --------- Si no es ni JSON ni multipart ---------
-    return jsonify({
-        "error": "Bad request: envía JSON (markdown + images base64) o multipart/form-data (markdown + campo images como string JSON)."
-    }), 400
+    return jsonify({"error": "Bad request"}), 400
+
+# -------------------- Nuevo endpoint /merge --------------------
+
+@app.post("/merge")
+def merge_docx():
+    """
+    Espera JSON con {"docs": {"1": base64docx1, "2": base64docx2, ...}}
+    Devuelve un único DOCX concatenado
+    """
+    data = request.get_json(silent=True)
+    if not data or "docs" not in data or not isinstance(data["docs"], dict):
+        return jsonify({"error": "Bad request: envía JSON con campo 'docs'"}), 400
+
+    docs_dict = data["docs"]
+
+    merged = None
+    for key in sorted(docs_dict.keys(), key=lambda x: int(x)):
+        b64 = docs_dict[key]
+        try:
+            content = base64.b64decode(b64)
+            subdoc = Document(io.BytesIO(content))
+        except Exception as e:
+            return jsonify({"error": f"Error procesando doc {key}: {e}"}), 400
+
+        if merged is None:
+            merged = Document(io.BytesIO(content))
+        else:
+            for element in subdoc.element.body:
+                merged.element.body.append(element)
+
+    buf = io.BytesIO()
+    merged.save(buf)
+    buf.seek(0)
+
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=data.get("output_name", "merged.docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
