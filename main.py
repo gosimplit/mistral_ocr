@@ -310,8 +310,7 @@ def make_docx():
 def merge_docx():
     """
     Soporta JSON o form-data.
-    - En JSON: {"docs": {..}} o {"docs": "<string JSON>"}
-    - En form-data: campo "docs" (string JSON), campo "output_name"
+    Concatena documentos con salto de página entre cada uno.
     """
     data = request.get_json(silent=True)
     if not data:
@@ -322,7 +321,6 @@ def merge_docx():
 
     docs_field = data["docs"]
 
-    # Parsear docs
     if isinstance(docs_field, str):
         try:
             docs_dict = json.loads(docs_field)
@@ -345,6 +343,8 @@ def merge_docx():
         if merged is None:
             merged = Document(io.BytesIO(content))
         else:
+            # salto de página antes de añadir nuevo documento
+            merged.add_page_break()
             for element in subdoc.element.body:
                 merged.element.body.append(element)
 
