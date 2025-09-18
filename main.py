@@ -24,6 +24,11 @@ TABLE_ROW_RE    = re.compile(r'^\s*\|(.+)\|\s*$')
 IMG_LINE_RE     = re.compile(r'^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$')
 IMG_INLINE_RE   = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 
+# --- NUEVAS REGEX PARA ESTILOS EN LÍNEA ---
+BOLD_ITALIC_RE  = re.compile(r'\*\*\*(.+?)\*\*\*')   # ***texto***
+BOLD_RE         = re.compile(r'\*\*(.+?)\*\*')       # **texto**
+ITALIC_RE       = re.compile(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)')  # *texto*
+
 def force_styles_black(doc: Document):
     target_styles = ["Normal", "List Paragraph", "List Bullet", "List Number"]
     target_styles += [f"Heading {i}" for i in range(1, 10)]
@@ -35,11 +40,45 @@ def force_styles_black(doc: Document):
         except KeyError:
             pass
 
+# --- NUEVA VERSIÓN ---
 def add_paragraph(doc, text):
     if not text.strip():
         doc.add_paragraph("")
-    else:
-        doc.add_paragraph(text)
+        return
+
+    p = doc.add_paragraph()
+
+    # Vamos recorriendo el texto aplicando prioridades: negrita+cursiva > negrita > cursiva
+    pos = 0
+    pattern = re.compile(
+        r'(\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*(?!\*)(.+?)(?<!\*)\*)'
+    )
+
+    for m in pattern.finditer(text):
+        # texto normal antes del match
+        if m.start() > pos:
+            run = p.add_run(text[pos:m.start()])
+            run.bold = False
+            run.italic = False
+
+        token = m.group(0)
+        if token.startswith("***") and token.endswith("***"):
+            run = p.add_run(token[3:-3])
+            run.bold = True
+            run.italic = True
+        elif token.startswith("**") and token.endswith("**"):
+            run = p.add_run(token[2:-2])
+            run.bold = True
+        elif token.startswith("*") and token.endswith("*"):
+            run = p.add_run(token[1:-1])
+            run.italic = True
+        pos = m.end()
+
+    # texto que sobra al final
+    if pos < len(text):
+        run = p.add_run(text[pos:])
+        run.bold = False
+        run.italic = False
 
 def flush_list(doc, buf, ordered):
     if not buf:
@@ -50,16 +89,13 @@ def flush_list(doc, buf, ordered):
     buf.clear()
 
 def is_align_row(row: str) -> bool:
-    """Detecta filas de alineación en tablas Markdown como | :-- | :--: | --- |"""
     row = row.strip().strip("|").strip()
     cells = [c.strip() for c in row.split("|")]
-    # aceptar 2 o más guiones con opcionales dos puntos a izquierda/derecha
     return all(re.fullmatch(r':?-{2,}:?', c) for c in cells)
 
 def flush_table(doc, rows):
     if not rows:
         return
-    # Filtra filas de alineación
     filtered = [r for r in rows if not is_align_row(r)]
     if not filtered:
         return
@@ -305,10 +341,6 @@ def make_docx():
 
 @app.post("/merge")
 def merge_docx():
-    """
-    Soporta JSON o form-data.
-    Concatena documentos con salto de página entre cada uno.
-    """
     data = request.get_json(silent=True)
     if not data:
         data = request.form.to_dict()
@@ -359,20 +391,6 @@ def merge_docx():
 
 @app.post("/crop")
 def crop_image():
-    """
-    Espera:
-      - file: imagen original (binario, multipart/form-data)
-      - coords: JSON como string, por ejemplo:
-        {
-          "id":"img-0.jpeg",
-          "top_left_x":289,
-          "top_left_y":667,
-          "bottom_right_x":1132,
-          "bottom_right_y":891
-        }
-    Devuelve:
-      - La imagen recortada en binario (JPEG).
-    """
     if "file" not in request.files:
         return jsonify({"error": "Falta la imagen en 'file'"}), 400
     coords_raw = request.form.get("coords")
