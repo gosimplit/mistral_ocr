@@ -1,20 +1,16 @@
-import os
-import io
-import re
-import base64
-import json
-from flask import Flask, request, send_file, jsonify
-from docx import Document
-from docx.shared import RGBColor, Inches
-from werkzeug.datastructures import FileStorage
-from PIL import Image, UnidentifiedImageError
-from docxcompose.composer import Composer  
+import io        # (BytesIO para manejar ficheros en memoria)
+import re        # (regex para detectar markdown, títulos, etc.)
+import base64    # (decodificar documentos en /merge y manejar imágenes)
+import json      # (parsear docs que llegan como string JSON)
+from flask import Flask, request, send_file, jsonify   #Imprescindible
+from docx import Document      #(crear/abrir documentos Word)
+from docx.shared import RGBColor, Inches   #(colores, tamaños imágenes)
+from werkzeug.datastructures import FileStorage   #(cuando subes imágenes en multipart/form-data)
+from PIL import Image   #(para redimensionar imágenes)
+from docxcompose.composer import Composer   #(merge correcto de docx)
+
 
 app = Flask(__name__)
-
-@app.get("/health")
-def health():
-    return jsonify({"ok": True})
 
 # ------------ Utilidades Markdown -> DOCX ----------------
 
@@ -112,7 +108,8 @@ def add_image_paragraph(doc: Document, img_bytes: bytes):
 
     stream = io.BytesIO(img_bytes)
     try:
-        with Image.open(io.BytesIO(img_bytes)) as im:
+        from PIL import Image as PILImage
+        with PILImage.open(io.BytesIO(img_bytes)) as im:
             width_px, height_px = im.size
             dpi_x = im.info.get("dpi", (96, 96))[0] or 96
             width_in = width_px / float(dpi_x)
@@ -378,49 +375,3 @@ def merge_docx():
         download_name=data.get("output_name", "merged.docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-
-# -------------------- Endpoint /crop --------------------
-
-@app.post("/crop")
-def crop_image():
-    if "file" not in request.files:
-        return jsonify({"error": "Falta la imagen en 'file'"}), 400
-    coords_raw = request.form.get("coords")
-    if not coords_raw:
-        return jsonify({"error": "Faltan las coordenadas en 'coords'"}), 400
-
-    try:
-        coords = json.loads(coords_raw)
-    except Exception as e:
-        return jsonify({"error": f"coords inválido: {e}"}), 400
-
-    try:
-        img_file = request.files["file"]
-        img = Image.open(img_file.stream).convert("RGB")
-    except UnidentifiedImageError:
-        return jsonify({"error": "Formato de imagen no reconocido"}), 400
-
-    try:
-        x1 = int(coords["top_left_x"])
-        y1 = int(coords["top_left_y"])
-        x2 = int(coords["bottom_right_x"])
-        y2 = int(coords["bottom_right_y"])
-    except Exception:
-        return jsonify({"error": "Coordenadas incompletas o no numéricas"}), 400
-
-    crop = img.crop((x1, y1, x2, y2))
-
-    buf = io.BytesIO()
-    crop.save(buf, format="JPEG", quality=92)
-    buf.seek(0)
-
-    return send_file(
-        buf,
-        mimetype="image/jpeg",
-        as_attachment=True,
-        download_name=coords.get("id", "crop.jpeg")
-    )
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
