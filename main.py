@@ -1,14 +1,13 @@
-import io        # (BytesIO para manejar ficheros en memoria)
-import re        # (regex para detectar markdown, títulos, etc.)
-import base64    # (decodificar documentos en /merge y manejar imágenes)
-import json      # (parsear docs que llegan como string JSON)
-from flask import Flask, request, send_file, jsonify   #Imprescindible
-from docx import Document      #(crear/abrir documentos Word)
-from docx.shared import RGBColor, Inches   #(colores, tamaños imágenes)
-from werkzeug.datastructures import FileStorage   #(cuando subes imágenes en multipart/form-data)
-from PIL import Image   #(para redimensionar imágenes)
-from docxcompose.composer import Composer   #(merge correcto de docx)
-
+import io        # BytesIO para manejar ficheros en memoria
+import re        # regex para detectar markdown, títulos, etc.
+import base64    # decodificar documentos en /merge y manejar imágenes
+import json      # parsear docs que llegan como string JSON
+from flask import Flask, request, send_file, jsonify   # framework web
+from docx import Document      # crear/abrir documentos Word
+from docx.shared import RGBColor, Inches   # colores, tamaños imágenes
+from werkzeug.datastructures import FileStorage   # manejar uploads multipart
+from PIL import Image   # redimensionar imágenes
+from docxcompose.composer import Composer   # merge correcto de docx
 
 app = Flask(__name__)
 
