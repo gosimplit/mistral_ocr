@@ -21,6 +21,10 @@ TABLE_ROW_RE    = re.compile(r'^\s*\|(.+)\|\s*$')
 IMG_LINE_RE     = re.compile(r'^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$')
 IMG_INLINE_RE   = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 
+# 👉 NUEVO: regex para fórmulas matemáticas
+MATH_INLINE_RE = re.compile(r'\$(.+?)\$')
+MATH_BLOCK_RE  = re.compile(r'^\$\$(.+?)\$\$$')
+
 def force_styles_black(doc: Document):
     target_styles = ["Normal", "List Paragraph", "List Bullet", "List Number"]
     target_styles += [f"Heading {i}" for i in range(1, 10)]
@@ -64,6 +68,30 @@ def add_paragraph(doc, text):
         run = p.add_run(text[pos:])
         run.bold = False
         run.italic = False
+
+# 👉 NUEVO: función para procesar párrafos con matemáticas
+def add_paragraph_with_math(doc, text):
+    # Caso bloque tipo $$ ... $$
+    m_block = MATH_BLOCK_RE.match(text.strip())
+    if m_block:
+        formula = m_block.group(1)
+        p = doc.add_paragraph()
+        run = p.add_run(formula)
+        run.font.name = "Cambria Math"
+        return
+
+    # Caso inline $...$
+    pos = 0
+    p = doc.add_paragraph()
+    for m in MATH_INLINE_RE.finditer(text):
+        if m.start() > pos:
+            p.add_run(text[pos:m.start()])
+        formula = m.group(1)
+        run = p.add_run(formula)
+        run.font.name = "Cambria Math"
+        pos = m.end()
+    if pos < len(text):
+        p.add_run(text[pos:])
 
 def flush_list(doc, buf, ordered):
     if not buf:
@@ -142,13 +170,13 @@ def handle_inline_images(doc: Document, text: str, images: dict):
         parts.append(("text", text[last_end:]))
 
     if not parts:
-        add_paragraph(doc, text)
+        add_paragraph_with_math(doc, text)   # 👉 ahora usa la nueva función
         return
 
     for kind, payload in parts:
         if kind == "text":
             if payload.strip():
-                add_paragraph(doc, payload.strip())
+                add_paragraph_with_math(doc, payload.strip())
             else:
                 doc.add_paragraph("")
         else:
@@ -173,7 +201,7 @@ def markdown_to_doc(md_text: str, images: dict, filename: str = "output.docx"):
             if IMG_INLINE_RE.search(text):
                 handle_inline_images(doc, text, images)
             else:
-                add_paragraph(doc, text)
+                add_paragraph_with_math(doc, text)
 
     for raw in lines:
         line = raw.rstrip("\n")
@@ -273,7 +301,7 @@ def make_docx():
         else:
             doc = Document()
             force_styles_black(doc)
-            add_paragraph(doc, data.get("text", ""))
+            add_paragraph_with_math(doc, data.get("text", ""))
             buf = io.BytesIO()
             doc.save(buf)
             buf.seek(0)
@@ -311,7 +339,7 @@ def make_docx():
         else:
             doc = Document()
             force_styles_black(doc)
-            add_paragraph(doc, plain_text or "")
+            add_paragraph_with_math(doc, plain_text or "")
             buf = io.BytesIO()
             doc.save(buf)
             buf.seek(0)
@@ -377,12 +405,3 @@ def merge_docx():
         download_name=data.get("output_name", "merged.docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-
-
-    return send_file(
-        buf,
-        as_attachment=True,
-        download_name=data.get("output_name", "merged.docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
-
