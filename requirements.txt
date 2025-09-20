@@ -1,5 +1,5 @@
 Flask
+gunicorn
 python-docx
 Pillow
 docxcompose
-
