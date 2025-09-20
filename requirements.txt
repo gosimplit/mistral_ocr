@@ -1,4 +1,5 @@
 Flask
 python-docx
 Pillow
+docxcompose
 
