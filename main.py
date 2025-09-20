@@ -8,8 +8,7 @@ from docx import Document
 from docx.shared import RGBColor, Inches
 from werkzeug.datastructures import FileStorage
 from PIL import Image, UnidentifiedImageError
-from docxcompose.composer import Composer
-
+from docxcompose.composer import Composer  
 
 app = Flask(__name__)
 
@@ -38,16 +37,11 @@ def force_styles_black(doc: Document):
             pass
 
 def add_paragraph(doc, text):
-    """
-    Convierte Markdown inline (**negrita**, *cursiva*, ***negrita+cursiva***) en runs formateados.
-    """
     if not text.strip():
         doc.add_paragraph("")
         return
 
     p = doc.add_paragraph()
-
-    # Regex combinada que detecta ***...***, **...** y *...*
     token_re = re.compile(r'(\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*(?!\*)(.+?)(?<!\*)\*)')
 
     pos = 0
@@ -84,7 +78,6 @@ def flush_list(doc, buf, ordered):
     buf.clear()
 
 def is_align_row(row: str) -> bool:
-    """Detecta filas de alineación en tablas Markdown como | :-- | :--: | --- |"""
     row = row.strip().strip("|").strip()
     cells = [c.strip() for c in row.split("|")]
     return all(re.fullmatch(r':?-{2,}:?', c) for c in cells)
@@ -118,7 +111,6 @@ def add_image_paragraph(doc: Document, img_bytes: bytes):
     usable_width_in = float(usable_width_emu) / EMUS_PER_INCH
 
     stream = io.BytesIO(img_bytes)
-
     try:
         with Image.open(io.BytesIO(img_bytes)) as im:
             width_px, height_px = im.size
@@ -337,10 +329,6 @@ def make_docx():
 
 @app.post("/merge")
 def merge_docx():
-    """
-    Soporta JSON o form-data.
-    Concatena documentos con salto de página entre cada uno.
-    """
     data = request.get_json(silent=True)
     if not data:
         data = request.form.to_dict()
@@ -353,14 +341,17 @@ def merge_docx():
     if isinstance(docs_field, str):
         try:
             docs_dict = json.loads(docs_field)
-        except Exception:
-            return jsonify({"error": "El campo 'docs' no es un JSON válido"}), 400
+        except Exception as e:
+            return jsonify({"error": f"No se pudo parsear 'docs': {e}"}), 400
     elif isinstance(docs_field, dict):
         docs_dict = docs_field
     else:
         return jsonify({"error": "Formato de 'docs' no válido"}), 400
-        
-        merged = None
+
+    if not docs_dict:
+        return jsonify({"error": "No se recibió ningún documento para mergear"}), 400
+
+    merged = None
     composer = None
 
     for key in sorted(docs_dict.keys(), key=lambda x: int(x)):
@@ -392,20 +383,6 @@ def merge_docx():
 
 @app.post("/crop")
 def crop_image():
-    """
-    Espera:
-      - file: imagen original (binario, multipart/form-data)
-      - coords: JSON como string, por ejemplo:
-        {
-          "id":"img-0.jpeg",
-          "top_left_x":289,
-          "top_left_y":667,
-          "bottom_right_x":1132,
-          "bottom_right_y":891
-        }
-    Devuelve:
-      - La imagen recortada en binario (JPEG).
-    """
     if "file" not in request.files:
         return jsonify({"error": "Falta la imagen en 'file'"}), 400
     coords_raw = request.form.get("coords")
@@ -447,5 +424,3 @@ def crop_image():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-
