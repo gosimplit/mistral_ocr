@@ -8,6 +8,7 @@ from docx.shared import RGBColor, Inches   # colores, tamaños imágenes
 from werkzeug.datastructures import FileStorage   # manejar uploads multipart
 from PIL import Image   # redimensionar imágenes
 from docxcompose.composer import Composer   # merge correcto de docx
+from docx.enum.section import WD_SECTION
 
 app = Flask(__name__)
 
@@ -362,6 +363,8 @@ def merge_docx():
             merged = subdoc
             composer = Composer(merged)
         else:
+            # 👉 Forzar que cada doc nuevo empiece en página nueva
+            merged.add_section(WD_SECTION.NEW_PAGE)
             composer.append(subdoc)
 
     buf = io.BytesIO()
@@ -374,3 +377,12 @@ def merge_docx():
         download_name=data.get("output_name", "merged.docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+
+
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=data.get("output_name", "merged.docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
