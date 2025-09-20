@@ -8,6 +8,8 @@ from docx import Document
 from docx.shared import RGBColor, Inches
 from werkzeug.datastructures import FileStorage
 from PIL import Image, UnidentifiedImageError
+from docxcompose.composer import Composer
+
 
 app = Flask(__name__)
 
@@ -357,8 +359,10 @@ def merge_docx():
         docs_dict = docs_field
     else:
         return jsonify({"error": "Formato de 'docs' no válido"}), 400
+        
+        merged = None
+    composer = None
 
-    merged = None
     for key in sorted(docs_dict.keys(), key=lambda x: int(x)):
         b64 = docs_dict[key]
         try:
@@ -368,11 +372,10 @@ def merge_docx():
             return jsonify({"error": f"Error procesando doc {key}: {e}"}), 400
 
         if merged is None:
-            merged = Document(io.BytesIO(content))
+            merged = subdoc
+            composer = Composer(merged)
         else:
-            merged.add_page_break()
-            for element in subdoc.element.body:
-                merged.element.body.append(element)
+            composer.append(subdoc)
 
     buf = io.BytesIO()
     merged.save(buf)
@@ -444,3 +447,4 @@ def crop_image():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
